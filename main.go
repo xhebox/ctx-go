@@ -47,7 +47,7 @@ func main() {
 
 	buf,e := ioutil.ReadFile(in)
 	if e != nil {
-		log.Println("failed to read input")
+		log.Fatalln("failed to read input")
 	}
 	rd := bytes.NewReader(buf)
 
@@ -55,32 +55,32 @@ func main() {
 	case "parse":
 		e = binary.Read(rd, binary.LittleEndian, &h.Unknow)
 		if e != nil {
-			log.Println("failed to read")
+			log.Fatalln("failed to read")
 		}
 
 		e = binary.Read(rd, binary.LittleEndian, &h.index_count)
 		if e != nil {
-			log.Println("failed to read")
+			log.Fatalln("failed to read")
 		}
 
 		for a := uint32(0); a<h.index_count; a++ {
 			l := uint32(0)
 			e = binary.Read(rd, binary.LittleEndian, &l)
 			if e != nil {
-				log.Println("failed to read")
+				log.Fatalln("failed to read")
 			}
 
 			var i Index
 			i.name = make([]uint16, l)
 			e = binary.Read(rd, binary.LittleEndian, &i.name)
 			if e != nil {
-				log.Println("failed to read")
+				log.Fatalln("failed to read")
 			}
 			i.Name = string(utf16.Decode(i.name))
 
 			e = binary.Read(rd, binary.LittleEndian, &i.off)
 			if e != nil {
-				log.Println("failed to read")
+				log.Fatalln("failed to read")
 			}
 
 			h.Index = append(h.Index, i)
@@ -92,7 +92,7 @@ func main() {
 			i := &h.Index[n]
 			_,e = rd.Seek(h.header_size+int64(i.off), io.SeekStart)
 			if e != nil {
-				log.Println("failed to seek", h.header_size+int64(i.off))
+				log.Fatalln("failed to seek", h.header_size+int64(i.off))
 			}
 
 			var end uint32
@@ -108,19 +108,19 @@ func main() {
 				if e == io.EOF {
 					break
 				} else if e != nil {
-					log.Println("failed to read")
+					log.Fatalln("failed to read")
 				}
 
 				l := uint32(0)
 				e = binary.Read(rd, binary.LittleEndian, &l)
 				if e != nil {
-					log.Println("failed to read")
+					log.Fatalln("failed to read")
 				}
 				if l != 0 {
 					s.str = make([]uint16, l)
 					e = binary.Read(rd, binary.LittleEndian, &s.str)
 					if e != nil {
-						log.Println("failed to read")
+						log.Fatalln("failed to read")
 					}
 					s.Str = string(utf16.Decode(s.str))
 				}
@@ -137,12 +137,12 @@ func main() {
 		encoder.SetIndent("", "\t")
 		e = encoder.Encode(&h)
 		if e != nil {
-			log.Println("failed to convert to json")
+			log.Fatalln("failed to convert to json")
 		}
 	case "compile":
 		e = json.NewDecoder(rd).Decode(&h)
 		if e != nil {
-			log.Println("failed to parse json")
+			log.Fatalln("failed to parse json")
 		}
 
 		off := uint32(0)
@@ -166,24 +166,24 @@ func main() {
 
 		e = binary.Write(&buffer, binary.LittleEndian, h.Unknow)
 		if e != nil {
-			log.Println("failed to write")
+			log.Fatalln("failed to write")
 		}
 		e = binary.Write(&buffer, binary.LittleEndian, h.index_count)
 		if e != nil {
-			log.Println("failed to write")
+			log.Fatalln("failed to write")
 		}
 		for _,i := range h.Index {
 			e = binary.Write(&buffer, binary.LittleEndian, uint32(len(i.name)))
 			if e != nil {
-				log.Println("failed to write")
+				log.Fatalln("failed to write")
 			}
 			e = binary.Write(&buffer, binary.LittleEndian, i.name)
 			if e != nil {
-				log.Println("failed to write")
+				log.Fatalln("failed to write")
 			}
 			e = binary.Write(&buffer, binary.LittleEndian, i.off)
 			if e != nil {
-				log.Println("failed to write")
+				log.Fatalln("failed to write")
 			}
 		}
 
@@ -191,15 +191,15 @@ func main() {
 			for _,s := range i.Single {
 				e = binary.Write(&buffer, binary.LittleEndian, s.Id)
 				if e != nil {
-					log.Println("failed to write")
+					log.Fatalln("failed to write")
 				}
 				e = binary.Write(&buffer, binary.LittleEndian, uint32(len(s.str)))
 				if e != nil {
-					log.Println("failed to write")
+					log.Fatalln("failed to write")
 				}
 				e = binary.Write(&buffer, binary.LittleEndian, s.str)
 				if e != nil {
-					log.Println("failed to write")
+					log.Fatalln("failed to write")
 				}
 			}
 		}
@@ -207,6 +207,6 @@ func main() {
 
 	e = ioutil.WriteFile(out, buffer.Bytes(), 0644)
 	if e != nil {
-		log.Println("failed to write output")
+		log.Fatalln("failed to write output")
 	}
 }
