@@ -2,17 +2,28 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"flag"
-	"io"
+	"fmt"
 	"io/ioutil"
 	"log"
+	"reflect"
 	"unicode/utf16"
+	"unsafe"
+
+	"github.com/dop251/goja"
+	"github.com/xhebox/bstruct"
+	"golang.org/x/text/encoding/unicode"
 )
 
+func str_bytes(s string) []byte {
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	hdr := reflect.SliceHeader{Data: sh.Data, Len: sh.Len, Cap: sh.Len}
+	return *(*[]byte)(unsafe.Pointer(&hdr))
+}
+
 type Single struct {
-	Id  uint32
+	Id uint32
 
 	// this is the original data
 	str []uint16
@@ -26,16 +37,30 @@ type Index struct {
 	off  uint32
 
 	// this should be the body of ctx file, but moved here to transform conveniently between json/ctx
-	Name   string
+	Name    string
 	Singles []Single
 }
 
 type Ctx struct {
-	// magic i think, i am not sure
-	Unknow [8]byte
-	index_count uint32
-	Indexs  []Index
-	header_size int64
+	Hdr struct {
+		// magic i think, i am not sure
+		Unknow      [8]byte
+		Index_count uint32 `prog:"if (!proc&&prog) cur.Index_count.set(cur.Indexs.length())"`
+		Indexs      []struct {
+			Len   uint32   `json:"-" prog:"if (!proc&&prog) cur.Len.set(cur.Rname.value().length)"`
+			Name  []uint16 `json:"-" length:"cur.Len.value()" skip:"w"`
+			Rname string   `prog:"if (proc&&prog) cur.Rname.set(utf16to8(cur.Name.value())); if (!proc&&prog) cur.Rname.set(utf8to16(cur.Rname.value()));"`
+			Off   uint32
+		} `length:"idxcnt=cur.Index_count.value(); idxcnt"`
+	} `prog:"hdr = cur.Hdr; if (proc&&!prog) read(hdr.Indexs[0].Off.value());"`
+	Body []struct {
+		Singles []struct {
+			Id   uint32
+			Len  uint32   `json:"-" prog:"if (!proc&&prog) cur.Len.set(cur.Rstr.value().length)"`
+			Str  []uint16 `json:"-" length:"cur.Len.value()" skip:"w"`
+			Rstr string   `prog:"if (proc&&prog) cur.Rstr.set(utf16to8(cur.Str.value())); if (!proc&&prog) cur.Rstr.set(utf8to16(cur.Rstr.value()));"`
+		} `size:"kstack[0] < idxcnt-1 ? hdr.Indexs[kstack[0]+1].Off.value() - hdr.Indexs[kstack[0]].Off.value() : -1"`
+	} `length:"idxcnt"`
 }
 
 func main() {
@@ -54,91 +79,48 @@ func main() {
 	}
 	rd := bytes.NewReader(buf)
 
+	t, e := bstruct.New(h)
+	if e != nil {
+		log.Fatalln(e)
+	}
+
+	rt := goja.New()
+	rt.Set("utf16to8", func(f goja.FunctionCall) goja.Value {
+		if len(f.Arguments) != 1 {
+			panic("except a slice of uint16")
+		}
+
+		v := f.Arguments[0].Export()
+		if rv, ok := v.([]uint16); ok {
+			return rt.ToValue(string(utf16.Decode(rv)))
+		}
+
+		return rt.ToValue("")
+	})
+	rt.Set("utf8to16", func(f goja.FunctionCall) goja.Value {
+		if len(f.Arguments) != 1 {
+			panic("except one argument")
+		}
+
+		var src string
+		srcv := f.Arguments[0].Export()
+		src, ok := srcv.(string)
+		if !ok {
+			panic("except a string")
+		}
+
+		str, e := unicode.All[3].NewEncoder().String(src)
+		if e != nil {
+			panic(e)
+		}
+
+		return rt.ToValue(str)
+	})
+
 	switch mode {
 	case "parse":
-		e = binary.Read(rd, binary.LittleEndian, &h.Unknow)
-		if e != nil {
-			log.Fatalln("failed to read Header.Unknow")
-		}
-
-		e = binary.Read(rd, binary.LittleEndian, &h.index_count)
-		if e != nil {
-			log.Fatalln("failed to read Header.index_count")
-		}
-
-		for a := uint32(0); a < h.index_count; a++ {
-			var i Index
-
-			l := uint32(0)
-			e = binary.Read(rd, binary.LittleEndian, &l)
-			if e != nil {
-				log.Fatalln("failed to read the length of Header.Index[", a, " ].name")
-			}
-
-			i.name = make([]uint16, l)
-			e = binary.Read(rd, binary.LittleEndian, &i.name)
-			if e != nil {
-				log.Fatalln("failed to read Header.Index[", a, " ].name")
-			}
-			i.Name = string(utf16.Decode(i.name))
-
-			e = binary.Read(rd, binary.LittleEndian, &i.off)
-			if e != nil {
-				log.Fatalln("failed to read Header.Index[", a, " ].off")
-			}
-
-			h.Indexs = append(h.Indexs, i)
-		}
-		h.header_size = rd.Size() - int64(rd.Len())
-
-		off := uint32(0)
-		for n, _ := range h.Indexs {
-			i := &h.Indexs[n]
-			_, e = rd.Seek(h.header_size+int64(i.off), io.SeekStart)
-			if e != nil {
-				log.Fatalln("failed to seek Body[", n, "], ", h.header_size+int64(i.off))
-			}
-
-			var end uint32
-			if (n + 1) < len(h.Indexs) {
-				end = h.Indexs[n+1].off
-			} else {
-				end = 0
-			}
-
-			cnt := uint32(0)
-			for {
-				var s Single
-				e = binary.Read(rd, binary.LittleEndian, &s.Id)
-				if e == io.EOF {
-					break
-				} else if e != nil {
-					log.Fatalln("failed to read Body[", n, "].Singles[", cnt, "].Id")
-				}
-
-				l := uint32(0)
-				e = binary.Read(rd, binary.LittleEndian, &l)
-				if e != nil {
-					log.Fatalln("failed to read the len of Body[", n, "].Singles[", cnt, "].Str")
-				}
-
-				if l != 0 {
-					s.str = make([]uint16, l)
-					e = binary.Read(rd, binary.LittleEndian, &s.str)
-					if e != nil {
-						log.Fatalln("failed to read Body[", n, "].Singles[", cnt, "].Str")
-					}
-
-					s.Str = string(utf16.Decode(s.str))
-				}
-				off += l*2 + 8
-
-				cnt++
-				i.Singles = append(i.Singles, s)
-				if off == end {
-					break
-				}
-			}
+		if e := t.Read(rd, &h, rt); e != nil {
+			log.Fatalf("%+v\n", e)
 		}
 
 		encoder := json.NewEncoder(&buffer)
@@ -153,69 +135,8 @@ func main() {
 			log.Fatalln("failed to parse json")
 		}
 
-		off := uint32(0)
-		h.index_count = uint32(len(h.Indexs))
-		h.header_size += int64(len(h.Indexs) * (4 * 2))
-		for _, i := range h.Indexs {
-			h.header_size += int64(len(i.name))
-		}
-
-		for n, _ := range h.Indexs {
-			i := &h.Indexs[n]
-			i.name = utf16.Encode([]rune(i.Name))
-			i.off = off
-
-			for n, _ := range i.Singles {
-				s := &i.Singles[n]
-				s.str = utf16.Encode([]rune(s.Str))
-				off += uint32(len(s.str)*2) + (4 * 2)
-			}
-		}
-
-		e = binary.Write(&buffer, binary.LittleEndian, h.Unknow)
-		if e != nil {
-			log.Fatalln("failed to write Header.Unknown")
-		}
-
-		e = binary.Write(&buffer, binary.LittleEndian, h.index_count)
-		if e != nil {
-			log.Fatalln("failed to write Header.index_count")
-		}
-
-		for n, i := range h.Indexs {
-			e = binary.Write(&buffer, binary.LittleEndian, uint32(len(i.name)))
-			if e != nil {
-				log.Fatalln("failed to write the len of Header.Index[", n, "].name")
-			}
-
-			e = binary.Write(&buffer, binary.LittleEndian, i.name)
-			if e != nil {
-				log.Fatalln("failed to write Header.Index[", n, "].name")
-			}
-
-			e = binary.Write(&buffer, binary.LittleEndian, i.off)
-			if e != nil {
-				log.Fatalln("failed to write Header.Index[", n, "].off")
-			}
-		}
-
-		for n, i := range h.Indexs {
-			for c, s := range i.Singles {
-				e = binary.Write(&buffer, binary.LittleEndian, s.Id)
-				if e != nil {
-					log.Fatalln("failed to write Body.Index[", n, "].Singles[", c, "].Id")
-				}
-
-				e = binary.Write(&buffer, binary.LittleEndian, uint32(len(s.str)))
-				if e != nil {
-					log.Fatalln("failed to write the len of Body.Index[", n, "].Singles[", c, "].str")
-				}
-
-				e = binary.Write(&buffer, binary.LittleEndian, s.str)
-				if e != nil {
-					log.Fatalln("failed to write Body.Index[", n, "].Singles[", c, "].str")
-				}
-			}
+		if e := t.Write(&buffer, &h, rt); e != nil {
+			log.Fatalf("%+v\n", e)
 		}
 	}
 
@@ -223,4 +144,6 @@ func main() {
 	if e != nil {
 		log.Fatalln("failed to write output")
 	}
+
+	fmt.Printf("x %+v\n", h.Hdr)
 }
