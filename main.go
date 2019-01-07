@@ -9,6 +9,7 @@ import (
 	"log"
 	"reflect"
 	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/dop251/goja"
@@ -26,7 +27,7 @@ type Ctx struct {
 	Hdr struct {
 		// magic i think, i am not sure
 		Unknow      [8]byte
-		Index_count uint32 `prog:"if (!proc&&prog) cur.Index_count.set(cur.Indexs.length())"`
+		Index_count uint32
 		Indexs      []struct {
 			Len   uint32   `json:"-" prog:"if (!proc&&prog) cur.Len.set(cur.Rname.value().length)"`
 			Name  []uint16 `json:"-" length:"cur.Len.value()" skip:"w"`
@@ -114,6 +115,21 @@ func main() {
 		e = json.NewDecoder(rd).Decode(&h)
 		if e != nil {
 			log.Fatalln("failed to parse json")
+		}
+
+		h.Hdr.Index_count = uint32(len(h.Body))
+		if h.Hdr.Index_count != uint32(len(h.Hdr.Indexs)) {
+			log.Fatalln("index is not consistent with body")
+		}
+
+		// update Off
+		h.Hdr.Indexs[0].Off = 0
+		for i, v := range h.Body[:len(h.Body)-1] {
+			total := uint32(0)
+			for _, k := range v.Singles {
+				total += uint32(utf8.RuneCountInString(k.Rstr))
+			}
+			h.Hdr.Indexs[i+1].Off = total
 		}
 
 		if e := t.Write(&buffer, &h, rt); e != nil {
