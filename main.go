@@ -22,25 +22,6 @@ func str_bytes(s string) []byte {
 	return *(*[]byte)(unsafe.Pointer(&hdr))
 }
 
-type Single struct {
-	Id uint32
-
-	// this is the original data
-	str []uint16
-
-	// this is the decoded string, not really included by ctx file
-	Str string
-}
-
-type Index struct {
-	name []uint16
-	off  uint32
-
-	// this should be the body of ctx file, but moved here to transform conveniently between json/ctx
-	Name    string
-	Singles []Single
-}
-
 type Ctx struct {
 	Hdr struct {
 		// magic i think, i am not sure
