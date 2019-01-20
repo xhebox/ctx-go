@@ -12,9 +12,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/dop251/goja"
 	"github.com/xhebox/bstruct"
-	"golang.org/x/text/encoding/unicode"
 )
 
 func str_bytes(s string) []byte {
@@ -29,20 +27,20 @@ type Ctx struct {
 		Unknow      [8]byte
 		Index_count uint32
 		Indexs      []struct {
-			Len   uint32   `json:"-" prog:"if (!proc&&prog) cur.Len.set(cur.Rname.value().length)"`
-			Name  []uint16 `json:"-" length:"cur.Len.value()" skip:"w"`
-			Rname string   `prog:"if (proc&&prog) cur.Rname.set(utf16to8(cur.Name.value())); if (!proc&&prog) cur.Rname.set(utf8to16(cur.Rname.value()));"`
+			Len   uint32   `json:"-"`
+			Rname []uint16 `json:"-" length:"current.Len"`
+			Name  string   `skip:"rw"`
 			Off   uint32
-		} `length:"idxcnt=cur.Index_count.value(); idxcnt"`
-	} `prog:"hdr = cur.Hdr; if (proc&&!prog) read(hdr.Indexs[0].Off.value());"`
+		} `length:"root.Hdr.Index_count"`
+	} `rdn:"read(root.Hdr.Indexs[0].Off)"`
 	Body []struct {
 		Singles []struct {
 			Id   uint32
-			Len  uint32   `json:"-" prog:"if (!proc&&prog) cur.Len.set(cur.Rstr.value().length)"`
-			Str  []uint16 `json:"-" length:"cur.Len.value()" skip:"w"`
-			Rstr string   `prog:"if (proc&&prog) cur.Rstr.set(utf16to8(cur.Str.value())); if (!proc&&prog) cur.Rstr.set(utf8to16(cur.Rstr.value()));"`
-		} `size:"kstack[0] < idxcnt-1 ? hdr.Indexs[kstack[0]+1].Off.value() - hdr.Indexs[kstack[0]].Off.value() : -1"`
-	} `length:"idxcnt"`
+			Len  uint32   `json:"-"`
+			Rstr []uint16 `json:"-" length:"current.Len"`
+			Str  string   `skip:"rw"`
+		} `size:"k < root.Hdr.Index_count-1 ? root.Hdr.Indexs[k+1].Off - root.Hdr.Indexs[k].Off : -1"`
+	} `length:"root.Hdr.Index_count"`
 }
 
 func main() {
@@ -61,48 +59,27 @@ func main() {
 	}
 	rd := bytes.NewReader(buf)
 
-	t, e := bstruct.New(h)
-	if e != nil {
-		log.Fatalln(e)
-	}
-
-	rt := goja.New()
-	rt.Set("utf16to8", func(f goja.FunctionCall) goja.Value {
-		if len(f.Arguments) != 1 {
-			panic("except a slice of uint16")
-		}
-
-		v := f.Arguments[0].Export()
-		if rv, ok := v.([]uint16); ok {
-			return rt.ToValue(string(utf16.Decode(rv)))
-		}
-
-		return rt.ToValue("")
-	})
-	rt.Set("utf8to16", func(f goja.FunctionCall) goja.Value {
-		if len(f.Arguments) != 1 {
-			panic("except one argument")
-		}
-
-		var src string
-		srcv := f.Arguments[0].Export()
-		src, ok := srcv.(string)
-		if !ok {
-			panic("except a string")
-		}
-
-		str, e := unicode.All[3].NewEncoder().String(src)
-		if e != nil {
-			panic(e)
-		}
-
-		return rt.ToValue(str)
-	})
+	t := bstruct.MustNew(h)
 
 	switch mode {
 	case "parse":
-		if e := t.Read(rd, &h, rt); e != nil {
+		dec := bstruct.NewDecoder()
+		dec.Rd = rd
+
+		if e := dec.Decode(t, &h); e != nil {
 			log.Fatalf("%+v\n", e)
+		}
+
+		idxs := h.Hdr.Indexs
+		for k := range idxs {
+			idxs[k].Name = string(utf16.Decode(idxs[k].Rname))
+		}
+
+		for _, body := range h.Body {
+			singles := body.Singles
+			for k := range singles {
+				singles[k].Str = string(utf16.Decode(singles[k].Rstr))
+			}
 		}
 
 		encoder := json.NewEncoder(&buffer)
@@ -117,22 +94,38 @@ func main() {
 			log.Fatalln("failed to parse json")
 		}
 
-		h.Hdr.Index_count = uint32(len(h.Body))
-		if h.Hdr.Index_count != uint32(len(h.Hdr.Indexs)) {
+		idxs := h.Hdr.Indexs
+		for k := range idxs {
+			idxs[k].Rname = utf16.Encode([]rune(idxs[k].Name))
+		}
+		h.Hdr.Index_count = uint32(len(idxs))
+
+		if h.Hdr.Index_count != uint32(len(h.Body)) {
 			log.Fatalln("index is not consistent with body")
 		}
 
-		// update Off
 		h.Hdr.Indexs[0].Off = 0
-		for i, v := range h.Body[:len(h.Body)-1] {
+		for i, body := range h.Body {
 			total := uint32(0)
-			for _, k := range v.Singles {
-				total += uint32(utf8.RuneCountInString(k.Rstr))
+			check := i < len(h.Body)-1
+
+			singles := body.Singles
+			for k := range singles {
+				singles[k].Rstr = utf16.Encode([]rune(singles[k].Str))
+				if check {
+					total += uint32(utf8.RuneCountInString(singles[k].Str))
+				}
 			}
-			h.Hdr.Indexs[i+1].Off = total
+
+			if check {
+				h.Hdr.Indexs[i+1].Off = total
+			}
 		}
 
-		if e := t.Write(&buffer, &h, rt); e != nil {
+		enc := bstruct.NewEncoder()
+		enc.Wt = &buffer
+
+		if e := enc.Encode(t, &h); e != nil {
 			log.Fatalf("%+v\n", e)
 		}
 	}
