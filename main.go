@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"reflect"
@@ -22,25 +21,23 @@ func str_bytes(s string) []byte {
 }
 
 type Ctx struct {
-	Hdr struct {
-		// magic i think, i am not sure
-		Unknow      [8]byte
-		Index_count uint32
-		Indexs      []struct {
-			Len   uint32   `json:"-"`
-			Rname []uint16 `json:"-" length:"current.Len"`
-			Name  string   `skip:"rw"`
-			Off   uint32
-		} `length:"root.Hdr.Index_count"`
-	} `rdn:"read(root.Hdr.Indexs[0].Off)"`
+	// magic i think, i am not sure
+	Unknow      [8]byte
+	Index_count uint32
+	Indexs      []struct {
+		Len   uint32   `json:"-"`
+		Rname []uint16 `json:"-" length:"current.Len"`
+		Name  string   `skip:"rw"`
+		Off   uint32
+	} `length:"root.Index_count"`
 	Body []struct {
 		Singles []struct {
 			Id   uint32
 			Len  uint32   `json:"-"`
 			Rstr []uint16 `json:"-" length:"current.Len"`
 			Str  string   `skip:"rw"`
-		} `size:"k < root.Hdr.Index_count-1 ? root.Hdr.Indexs[k+1].Off - root.Hdr.Indexs[k].Off : -1"`
-	} `length:"root.Hdr.Index_count"`
+		} `size:"k < root.Index_count-1 ? root.Indexs[k+1].Off - root.Indexs[k].Off : -1"`
+	} `length:"root.Index_count" rdm:"read(root.Indexs[0].Off)"`
 }
 
 func main() {
@@ -70,7 +67,7 @@ func main() {
 			log.Fatalf("%+v\n", e)
 		}
 
-		idxs := h.Hdr.Indexs
+		idxs := h.Indexs
 		for k := range idxs {
 			idxs[k].Name = string(utf16.Decode(idxs[k].Rname))
 		}
@@ -94,17 +91,17 @@ func main() {
 			log.Fatalln("failed to parse json")
 		}
 
-		idxs := h.Hdr.Indexs
+		idxs := h.Indexs
 		for k := range idxs {
 			idxs[k].Rname = utf16.Encode([]rune(idxs[k].Name))
 		}
-		h.Hdr.Index_count = uint32(len(idxs))
+		h.Index_count = uint32(len(idxs))
 
-		if h.Hdr.Index_count != uint32(len(h.Body)) {
+		if h.Index_count != uint32(len(h.Body)) {
 			log.Fatalln("index is not consistent with body")
 		}
 
-		h.Hdr.Indexs[0].Off = 0
+		h.Indexs[0].Off = 0
 		for i, body := range h.Body {
 			total := uint32(0)
 			check := i < len(h.Body)-1
@@ -118,7 +115,7 @@ func main() {
 			}
 
 			if check {
-				h.Hdr.Indexs[i+1].Off = total
+				h.Indexs[i+1].Off = total
 			}
 		}
 
@@ -134,6 +131,4 @@ func main() {
 	if e != nil {
 		log.Fatalln("failed to write output")
 	}
-
-	fmt.Printf("x %+v\n", h.Hdr)
 }
