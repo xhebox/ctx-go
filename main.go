@@ -6,19 +6,11 @@ import (
 	"flag"
 	"io/ioutil"
 	"log"
-	"reflect"
 	"unicode/utf16"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/xhebox/bstruct"
 )
-
-func str_bytes(s string) []byte {
-	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	hdr := reflect.SliceHeader{Data: sh.Data, Len: sh.Len, Cap: sh.Len}
-	return *(*[]byte)(unsafe.Pointer(&hdr))
-}
 
 type Ctx struct {
 	// magic i think, i am not sure
