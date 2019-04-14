@@ -12,24 +12,28 @@ import (
 	"github.com/xhebox/bstruct"
 )
 
+type Ctx_Index struct {
+	Len   uint32   `json:"-"`
+	Rname []uint16 `json:"-" length:"Rname_length"`
+	Name  string   `skip:"rw"`
+	Off   uint32
+}
+
+type Ctx_Single struct {
+	Id   uint32
+	Len  uint32   `json:"-"`
+	Rstr []uint16 `json:"-" length:"Rstr_length"`
+	Str  string   `skip:"rw"`
+}
+
 type Ctx struct {
 	// magic i think, i am not sure
 	Unknow      [8]byte
 	Index_count uint32
-	Indexs      []struct {
-		Len   uint32   `json:"-"`
-		Rname []uint16 `json:"-" length:"current.Len"`
-		Name  string   `skip:"rw"`
-		Off   uint32
-	} `length:"root.Index_count"`
-	Body []struct {
-		Singles []struct {
-			Id   uint32
-			Len  uint32   `json:"-"`
-			Rstr []uint16 `json:"-" length:"current.Len"`
-			Str  string   `skip:"rw"`
-		} `size:"k < root.Index_count-1 ? root.Indexs[k+1].Off - root.Indexs[k].Off : -1"`
-	} `length:"root.Index_count" rdm:"read(root.Indexs[0].Off)"`
+	Indexs      []Ctx_Index `length:"Indexs_length"`
+	Body        []struct {
+		Singles []Ctx_Single `size:"singles_size"`
+	} `length:"body_length" rdm:"body_rdm"`
 }
 
 func main() {
@@ -54,6 +58,40 @@ func main() {
 	case "parse":
 		dec := bstruct.NewDecoder()
 		dec.Rd = rd
+
+		dec.Runner.Register("Rname_length", func(s ...interface{}) interface{} {
+			return int(s[1].(Ctx_Index).Len)
+		})
+
+		dec.Runner.Register("Rstr_length", func(s ...interface{}) interface{} {
+			return int(s[1].(Ctx_Single).Len)
+		})
+
+		dec.Runner.Register("body_length", func(s ...interface{}) interface{} {
+			return int(s[0].(*Ctx).Index_count)
+		})
+
+		dec.Runner.Register("body_rdm", func(s ...interface{}) interface{} {
+			r := s[0].(*Ctx)
+
+			buf := make([]byte, r.Indexs[0].Off)
+
+			dec.Rd.Read(buf)
+			return nil
+		})
+
+		body_count := 0
+		dec.Runner.Register("singles_size", func(s ...interface{}) interface{} {
+			r := s[0].(*Ctx)
+
+			if body_count < int(r.Index_count-1) {
+				body_count++
+				return int(r.Indexs[body_count+1].Off - r.Indexs[body_count].Off)
+			} else {
+				body_count++
+				return -1
+			}
+		})
 
 		if e := dec.Decode(t, &h); e != nil {
 			log.Fatalf("%+v\n", e)
