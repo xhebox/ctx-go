@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"unicode/utf16"
-	"unicode/utf8"
 
 	"github.com/xhebox/bstruct"
 )
@@ -123,6 +122,7 @@ func main() {
 		idxs := h.Indexs
 		for k := range idxs {
 			idxs[k].Rname = utf16.Encode([]rune(idxs[k].Name))
+			idxs[k].Len = uint32(len(idxs[k].Rname))
 		}
 		h.Index_count = uint32(len(idxs))
 
@@ -131,15 +131,16 @@ func main() {
 		}
 
 		h.Indexs[0].Off = 0
+		total := uint32(0)
 		for i, body := range h.Body {
-			total := uint32(0)
 			check := i < len(h.Body)-1
 
 			singles := body.Singles
 			for k := range singles {
 				singles[k].Rstr = utf16.Encode([]rune(singles[k].Str))
+				singles[k].Len = uint32(len(singles[k].Rstr))
 				if check {
-					total += uint32(utf8.RuneCountInString(singles[k].Str))
+					total += 8 + singles[k].Len*2
 				}
 			}
 
