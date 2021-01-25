@@ -30,10 +30,10 @@ type Ctx struct {
 	// magic i think, i am not sure
 	Unknow      [8]byte
 	Index_count uint32
-	Indexs      []Ctx_Index `length:"Indexs_length"`
+	Indexs      []Ctx_Index `length:"Index_count"`
 	Body        []struct {
 		Singles []Ctx_Single `size:"singles_size"`
-	} `length:"body_length" rdm:"body_rdm"`
+	} `length:"Index_count" rdm:"body_rdm"`
 }
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 			return int(s[1].(Ctx_Single).Len)
 		})
 
-		dec.Runner.Register("body_length", func(s ...interface{}) interface{} {
+		dec.Runner.Register("Index_count", func(s ...interface{}) interface{} {
 			return int(s[0].(*Ctx).Index_count)
 		})
 
@@ -84,11 +84,10 @@ func main() {
 		dec.Runner.Register("singles_size", func(s ...interface{}) interface{} {
 			r := s[0].(*Ctx)
 
-			if body_count < int(r.Index_count-1) {
-				body_count++
-				return int(r.Indexs[body_count+1].Off - r.Indexs[body_count].Off)
+			body_count++
+			if body_count < int(r.Index_count) {
+				return int(r.Indexs[body_count].Off - r.Indexs[body_count-1].Off)
 			} else {
-				body_count++
 				return -1
 			}
 		})
