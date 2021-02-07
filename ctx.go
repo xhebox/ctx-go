@@ -158,19 +158,3 @@ func compileCtx(rd io.Reader, wt io.Writer) error {
 
 	return enc.Encode(ctxType, &h)
 }
-
-func handleCtx(mode string, rd io.Reader, wt io.Writer) error {
-	switch mode {
-	case "parse":
-		e := parseCtx(rd, wt)
-		if e != nil {
-			return fmt.Errorf("failed to convert ctx to json: %w", e)
-		}
-	case "compile":
-		e := compileCtx(rd, wt)
-		if e != nil {
-			return fmt.Errorf("failed to convert json to ctx: %w", e)
-		}
-	}
-	return nil
-}

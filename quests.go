@@ -2,81 +2,64 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
-	"unicode/utf16"
 
 	"github.com/xhebox/bstruct"
 )
 
-type String struct {
-	L uint32
-	R []uint16 `length:"R_length"`
-}
-
-func (s *String) Unmarshal() string {
-	return string(utf16.Decode(s.R))
-}
-
-func (s *String) Marshal(t string) {
-	s.R = utf16.Encode([]rune(t))
-	s.L = uint32(len(s.R))
-}
-
 type QuestSingle struct {
-	ID  uint64
-	Str [2]String `json:"-"`
-	S1  string    `skip:"rw"`
-	S2  string    `skip:"rw"`
-	Un1 uint32
+	Target StringWithID
+	RStr   String `json:"-"`
+	Str    string `skip:"rw"`
+	Un1    uint32
 }
 
 func (s *QuestSingle) Unmarshal() {
-	s.S1 = s.Str[0].Unmarshal()
-	s.S2 = s.Str[1].Unmarshal()
+	s.Target.Unmarshal()
+	s.Str = s.RStr.Unmarshal()
 }
 
 func (s *QuestSingle) Marshal() {
-	s.Str[0].Marshal(s.S1)
-	s.Str[1].Marshal(s.S2)
+	s.Target.Marshal()
+	s.RStr.Marshal(s.Str)
 }
 
-type QuestItem struct {
-	Main QuestSingle
-	Len  uint16        `json:"-"`
-	Sub  []QuestSingle `length:"Item_length"`
+type QuestSet struct {
+	Default    QuestSingle
+	Len        uint16        `json:"-"`
+	QuestItems []QuestSingle `length:"Items_length"`
 }
 
-func (item *QuestItem) Unmarshal() {
-	item.Main.Unmarshal()
-	for i := range item.Sub {
-		item.Sub[i].Unmarshal()
+func (item *QuestSet) Unmarshal() {
+	item.Default.Unmarshal()
+	for i := range item.QuestItems {
+		item.QuestItems[i].Unmarshal()
 	}
 }
 
-func (item *QuestItem) Marshal() {
-	item.Main.Marshal()
-	item.Len = uint16(len(item.Sub))
-	for i := range item.Sub {
-		item.Sub[i].Marshal()
+func (item *QuestSet) Marshal() {
+	item.Default.Marshal()
+	item.Len = uint16(len(item.QuestItems))
+	for i := range item.QuestItems {
+		item.QuestItems[i].Marshal()
 	}
 }
 
 type Quests struct {
-	Len   uint32      `json:"-"`
-	Items []QuestItem `length:"Items_length"`
+	Len    uint32     `json:"-"`
+	Quests []QuestSet `length:"Sets_length"`
 }
 
 func (q *Quests) Unmarshal() {
-	for i := range q.Items {
-		q.Items[i].Unmarshal()
+	for i := range q.Quests {
+		q.Quests[i].Unmarshal()
 	}
 }
 
 func (q *Quests) Marshal() {
-	q.Len = uint32(len(q.Items))
-	for i := range q.Items {
-		q.Items[i].Marshal()
+	q.Len = uint32(len(q.Quests))
+	for i := range q.Quests {
+		q.Quests[i].Marshal()
 	}
 }
 
@@ -92,11 +75,11 @@ func parseQuests(rd io.Reader, wt io.Writer) error {
 		return int(s[1].(String).L)
 	})
 
-	dec.Runner.Register("Item_length", func(s ...interface{}) interface{} {
-		return int(s[1].(QuestItem).Len)
+	dec.Runner.Register("Items_length", func(s ...interface{}) interface{} {
+		return int(s[1].(QuestSet).Len)
 	})
 
-	dec.Runner.Register("Items_length", func(s ...interface{}) interface{} {
+	dec.Runner.Register("Sets_length", func(s ...interface{}) interface{} {
 		return int(s[1].(Quests).Len)
 	})
 
@@ -124,20 +107,4 @@ func compileQuests(rd io.Reader, wt io.Writer) error {
 	enc := bstruct.NewEncoder()
 	enc.Wt = wt
 	return enc.Encode(ctxType, &h)
-}
-
-func handleQuests(mode string, rd io.Reader, wt io.Writer) error {
-	switch mode {
-	case "parse":
-		e := parseQuests(rd, wt)
-		if e != nil {
-			return fmt.Errorf("failed to convert ctx to json: %w", e)
-		}
-	case "compile":
-		e := compileQuests(rd, wt)
-		if e != nil {
-			return fmt.Errorf("failed to convert json to ctx: %w", e)
-		}
-	}
-	return nil
 }

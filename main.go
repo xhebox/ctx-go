@@ -3,8 +3,24 @@ package main
 import (
 	"bytes"
 	"flag"
+	"io"
 	"io/ioutil"
 	"log"
+)
+
+type Coder = func(rd io.Reader, wt io.Writer) error
+
+var (
+	encoders = map[string]Coder{
+		"quests":   compileQuests,
+		"ctx":      compileCtx,
+		"glossary": compileGlossary,
+	}
+	decoders = map[string]Coder{
+		"quests":   parseQuests,
+		"ctx":      parseCtx,
+		"glossary": parseGlossary,
+	}
 )
 
 func main() {
@@ -23,17 +39,25 @@ func main() {
 	}
 	rd := bytes.NewReader(buf)
 
-	switch format {
-	case "ctx":
-		if e := handleCtx(mode, rd, &buffer); e != nil {
-			log.Fatalln(e);
+	switch mode {
+	case "parse":
+		decoder, ok := decoders[format]
+		if !ok {
+			log.Fatalf("unsupport format: %s\n", format)
 		}
-	case "quests":
-		if e := handleQuests(mode, rd, &buffer); e != nil {
-			log.Fatalln(e);
+
+		if e := decoder(rd, &buffer); e != nil {
+			log.Fatalf("failed to convert %s to json: %s\n", format, e)
 		}
-	default:
-		log.Fatalf("unsupport format: %s\n", format)
+	case "compile":
+		encoder, ok := encoders[format]
+		if !ok {
+			log.Fatalf("unsupport format: %s\n", format)
+		}
+
+		if e := encoder(rd, &buffer); e != nil {
+			log.Fatalf("failed to convert json to %s: %s\n", format, e)
+		}
 	}
 
 	e = ioutil.WriteFile(out, buffer.Bytes(), 0644)
