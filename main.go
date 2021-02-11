@@ -12,14 +12,16 @@ type Coder = func(rd io.Reader, wt io.Writer) error
 
 var (
 	encoders = map[string]Coder{
-		"quests":   compileQuests,
-		"ctx":      compileCtx,
-		"glossary": compileGlossary,
+		"quests":    compileQuests,
+		"ctx":       compileCtx,
+		"glossary":  compileGlossary,
+		"dialogues": compileDialogues,
 	}
 	decoders = map[string]Coder{
-		"quests":   parseQuests,
-		"ctx":      parseCtx,
-		"glossary": parseGlossary,
+		"quests":    parseQuests,
+		"ctx":       parseCtx,
+		"glossary":  parseGlossary,
+		"dialogues": parseDialogues,
 	}
 )
 

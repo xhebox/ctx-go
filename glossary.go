@@ -2,92 +2,98 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
-
-	"github.com/xhebox/bstruct"
 )
 
-type GlossaryItem struct {
-	Target StringWithID
-	RStr   String `json:"-"`
-	Str    string `skip:"rw"`
-	Un1    uint32
-}
-
-func (s *GlossaryItem) Unmarshal() {
-	s.Target.Unmarshal()
-	s.Str = s.RStr.Unmarshal()
-}
-
-func (s *GlossaryItem) Marshal() {
-	s.Target.Marshal()
-	s.RStr.Marshal(s.Str)
-}
-
 type GlossarySet struct {
-	Category StringWithID
-	Len      uint32         `json:"-"`
-	Items    []GlossaryItem `length:"Items_length"`
+	Un1        U32
+	Un2        U32
+	Category   WideString
+	Glossaries []Single
 }
 
-func (item *GlossarySet) Unmarshal() {
-	item.Category.Unmarshal()
-	for i := range item.Items {
-		item.Items[i].Unmarshal()
+func (s *GlossarySet) Unmarshal(rd io.Reader) error {
+	if err := s.Un1.Unmarshal(rd); err != nil {
+		return fmt.Errorf("un1 -> %w", err)
 	}
-}
-
-func (item *GlossarySet) Marshal() {
-	item.Category.Marshal()
-	item.Len = uint32(len(item.Items))
-	for i := range item.Items {
-		item.Items[i].Marshal()
+	if err := s.Un2.Unmarshal(rd); err != nil {
+		return fmt.Errorf("un2 -> %w", err)
 	}
-}
-
-type Glossary struct {
-	Len        uint32        `json:"-"`
-	Glossaries []GlossarySet `length:"Sets_length"`
-}
-
-func (q *Glossary) Unmarshal() {
-	for i := range q.Glossaries {
-		q.Glossaries[i].Unmarshal()
+	if err := s.Category.Unmarshal(rd); err != nil {
+		return fmt.Errorf("category -> %w", err)
 	}
+	var length U32
+	if err := length.Unmarshal(rd); err != nil {
+		return fmt.Errorf("length -> %w", err)
+	}
+	s.Glossaries = make([]Single, length)
+	for i := range s.Glossaries {
+		if err := s.Glossaries[i].Unmarshal(rd); err != nil {
+			return fmt.Errorf("[%d/%d] successive -> %w", i, len(s.Glossaries), err)
+		}
+	}
+	return nil
 }
 
-func (q *Glossary) Marshal() {
-	q.Len = uint32(len(q.Glossaries))
-	for i := range q.Glossaries {
-		q.Glossaries[i].Marshal()
+func (s *GlossarySet) Marshal(wt io.Writer) error {
+	if err := s.Un1.Marshal(wt); err != nil {
+		return fmt.Errorf("un1 -> %w", err)
 	}
+	if err := s.Un2.Marshal(wt); err != nil {
+		return fmt.Errorf("un2 -> %w", err)
+	}
+	if err := s.Category.Marshal(wt); err != nil {
+		return fmt.Errorf("category -> %w", err)
+	}
+	length := U32(len(s.Glossaries))
+	if err := length.Marshal(wt); err != nil {
+		return fmt.Errorf("length -> %w", err)
+	}
+	for i := range s.Glossaries {
+		if err := s.Glossaries[i].Marshal(wt); err != nil {
+			return fmt.Errorf("[%d/%d] successive -> %w", i, len(s.Glossaries), err)
+		}
+	}
+	return nil
+}
+
+type Glossary []GlossarySet
+
+func (s *Glossary) Unmarshal(rd io.Reader) error {
+	var length U32
+	if err := length.Unmarshal(rd); err != nil {
+		return fmt.Errorf("length -> %w", err)
+	}
+	*s = make([]GlossarySet, length)
+	for i := range *s {
+		if err := (*s)[i].Unmarshal(rd); err != nil {
+			return fmt.Errorf("[%d/%d] glossarySet -> %s", i, len(*s), err)
+		}
+	}
+	return nil
+}
+
+func (s *Glossary) Marshal(wt io.Writer) error {
+	length := U32(len(*s))
+	if err := length.Marshal(wt); err != nil {
+		return fmt.Errorf("length -> %w", err)
+	}
+	for i := range *s {
+		if err := (*s)[i].Marshal(wt); err != nil {
+			return fmt.Errorf("[%d/%d] glossarySet -> %s", i, len(*s), err)
+		}
+	}
+	return nil
 }
 
 func parseGlossary(rd io.Reader, wt io.Writer) error {
 	var h Glossary
 
-	ctxType := bstruct.MustNew(h)
-
-	dec := bstruct.NewDecoder()
-	dec.Rd = rd
-
-	dec.Runner.Register("R_length", func(s ...interface{}) interface{} {
-		return int(s[1].(String).L)
-	})
-
-	dec.Runner.Register("Items_length", func(s ...interface{}) interface{} {
-		return int(s[1].(GlossarySet).Len)
-	})
-
-	dec.Runner.Register("Sets_length", func(s ...interface{}) interface{} {
-		return int(s[1].(Glossary).Len)
-	})
-
-	if e := dec.Decode(ctxType, &h); e != nil {
-		return e
+	if err := h.Unmarshal(rd); err != nil {
+		return err
 	}
 
-	h.Unmarshal()
 	encoder := json.NewEncoder(wt)
 	encoder.SetIndent("", "\t")
 	return encoder.Encode(&h)
@@ -96,15 +102,10 @@ func parseGlossary(rd io.Reader, wt io.Writer) error {
 func compileGlossary(rd io.Reader, wt io.Writer) error {
 	var h Glossary
 
-	ctxType := bstruct.MustNew(h)
-
-	e := json.NewDecoder(rd).Decode(&h)
-	if e != nil {
-		return e
+	err := json.NewDecoder(rd).Decode(&h)
+	if err != nil {
+		return err
 	}
 
-	h.Marshal()
-	enc := bstruct.NewEncoder()
-	enc.Wt = wt
-	return enc.Encode(ctxType, &h)
+	return h.Marshal(wt)
 }

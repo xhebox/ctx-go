@@ -4,89 +4,173 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
-	"github.com/xhebox/bstruct"
 )
 
-type CtxIndex struct {
-	Str  String `json:"-"`
-	Name string `skip:"rw"`
-	Off  uint32
-}
-
-func (i *CtxIndex) Unmarshal() {
-	i.Name = i.Str.Unmarshal()
-}
-
-func (i *CtxIndex) Marshal() {
-	i.Str.Marshal(i.Name)
-}
-
 type CtxSingle struct {
-	Id   uint32
-	Rstr String `json:"-"`
-	Str  string `skip:"rw"`
+	ID  U32
+	Str WideString
 }
 
-func (i *CtxSingle) Unmarshal() {
-	i.Str = i.Rstr.Unmarshal()
+func (i *CtxSingle) Unmarshal(rd io.Reader) error {
+	err := i.ID.Unmarshal(rd)
+	if err != nil {
+		return fmt.Errorf("id -> %w", err)
+	}
+	err = i.Str.Unmarshal(rd)
+	if err != nil {
+		return fmt.Errorf("str -> %w", err)
+	}
+	return nil
 }
 
-func (i *CtxSingle) Marshal() {
-	i.Rstr.Marshal(i.Str)
+func (i *CtxSingle) Marshal(wt io.Writer) error {
+	err := i.ID.Marshal(wt)
+	if err != nil {
+		return fmt.Errorf("id -> %w", err)
+	}
+	err = i.Str.Marshal(wt)
+	if err != nil {
+		return fmt.Errorf("str -> %w", err)
+	}
+	return nil
+}
+
+func (i *CtxSingle) Size() int {
+	return 4 + i.Str.Size()
+}
+
+type CtxLangIndex struct {
+	Str WideString
+	Off U32
+}
+
+func (i *CtxLangIndex) Unmarshal(rd io.Reader) error {
+	err := i.Str.Unmarshal(rd)
+	if err != nil {
+		return fmt.Errorf("str -> %w", err)
+	}
+	err = i.Off.Unmarshal(rd)
+	if err != nil {
+		return fmt.Errorf("off -> %w", err)
+	}
+	return nil
+}
+
+func (i *CtxLangIndex) Marshal(wt io.Writer) error {
+	err := i.Str.Marshal(wt)
+	if err != nil {
+		return fmt.Errorf("str -> %w", err)
+	}
+	err = i.Off.Marshal(wt)
+	if err != nil {
+		return fmt.Errorf("off -> %w", err)
+	}
+	return nil
 }
 
 type Ctx struct {
-	// magic i think, i am not sure
-	Unknow      [8]byte
-	Index_count uint32     `json:"-"`
-	Indexs      []CtxIndex `length:"Index_count"`
-	Body        []struct {
-		Singles []CtxSingle `size:"singles_size"`
-	} `length:"Index_count" rdm:"body_rdm"`
+	Un1        U32
+	Un2        U32
+	LangIndexs []CtxLangIndex
+	Languages  [][]CtxSingle
 }
 
-func (i *Ctx) Unmarshal() {
-	fmt.Printf("%+v\n", i)
-	for k := range i.Indexs {
-		i.Indexs[k].Unmarshal()
+func (s *Ctx) Unmarshal(rd io.Reader) error {
+	if err := s.Un1.Unmarshal(rd); err != nil {
+		return fmt.Errorf("un1 -> %w", err)
 	}
 
-	for j := range i.Body {
-		body := &i.Body[j]
-		for k := range body.Singles {
-			body.Singles[k].Unmarshal()
+	if err := s.Un2.Unmarshal(rd); err != nil {
+		return fmt.Errorf("un2 -> %w", err)
+	}
+
+	var length U32
+	if err := length.Unmarshal(rd); err != nil {
+		return fmt.Errorf("len -> %w", err)
+	}
+
+	if length == 0 {
+		return nil
+	}
+
+	s.LangIndexs = make([]CtxLangIndex, length)
+	for k := range s.LangIndexs {
+		if err := s.LangIndexs[k].Unmarshal(rd); err != nil {
+			return fmt.Errorf("[%d/%d] langindex -> %w", k, len(s.LangIndexs), err)
 		}
 	}
-}
 
-func (h *Ctx) Marshal() error {
-	h.Index_count = uint32(len(h.Indexs))
-	for k := range h.Indexs {
-		h.Indexs[k].Marshal()
+	if s.LangIndexs[0].Off != 0 {
+		return fmt.Errorf("unexpected 0 offset for the first language")
 	}
 
-	if h.Index_count != uint32(len(h.Body)) {
-		return fmt.Errorf("index is not consistent with body")
-	}
-
-	h.Indexs[0].Off = 0
-	total := uint32(0)
-	for i := range h.Body {
-		body := &h.Body[i]
-
-		check := i < len(h.Body)-1
-
-		singles := body.Singles
-		for k := range singles {
-			singles[k].Marshal()
-			if check {
-				total += 8 + singles[k].Rstr.L*2
+	s.Languages = make([][]CtxSingle, length)
+	for k := range s.LangIndexs {
+		last := k == len(s.Languages)-1
+		off := s.LangIndexs[k].Off
+		for {
+			if !last && off == s.LangIndexs[k+1].Off {
+				break
 			}
-		}
 
-		if check {
-			h.Indexs[i+1].Off = total
+			var t CtxSingle
+			err := t.Unmarshal(rd)
+			if err != nil {
+				if last && err == io.EOF {
+					return nil
+				} else {
+					total := U32(0)
+					if !last {
+						total = s.LangIndexs[k].Off
+					}
+					return fmt.Errorf("[%d/%d] single [%d - %d] -> %w", k, len(s.LangIndexs), off, total, err)
+				}
+			}
+
+			s.Languages[k] = append(s.Languages[k], t)
+			off += U32(t.Size())
+		}
+	}
+
+	return nil
+}
+
+func (s *Ctx) Marshal(wt io.Writer) error {
+	if err := s.Un1.Marshal(wt); err != nil {
+		return fmt.Errorf("un1 -> %w", err)
+	}
+
+	if err := s.Un2.Marshal(wt); err != nil {
+		return fmt.Errorf("un2 -> %w", err)
+	}
+
+	if len(s.LangIndexs) != len(s.Languages) {
+		return fmt.Errorf("len(langindexes) != len(languages)")
+	}
+
+	length := U32(len(s.LangIndexs))
+	if err := length.Marshal(wt); err != nil {
+		return fmt.Errorf("len -> %w", err)
+	}
+
+	if length == 0 {
+		return nil
+	}
+
+	for k := range s.LangIndexs {
+		if err := s.LangIndexs[k].Marshal(wt); err != nil {
+			return fmt.Errorf("[%d/%d] langindex -> %w", k, len(s.LangIndexs), err)
+		}
+	}
+
+	off := U32(0)
+	for k := range s.Languages {
+		s.LangIndexs[k].Off = off
+		for j := range s.Languages[k] {
+			if err := s.Languages[k][j].Marshal(wt); err != nil {
+				return fmt.Errorf("[%d/%d] single [%d - inf] -> %w", k, len(s.LangIndexs), off, err)
+			}
+			off += U32(s.Languages[k][j].Size())
 		}
 	}
 
@@ -96,43 +180,9 @@ func (h *Ctx) Marshal() error {
 func parseCtx(rd io.Reader, wt io.Writer) error {
 	var h Ctx
 
-	ctxType := bstruct.MustNew(h)
-
-	dec := bstruct.NewDecoder()
-	dec.Rd = rd
-
-	dec.Runner.Register("R_length", func(s ...interface{}) interface{} {
-		return int(s[1].(String).L)
-	})
-
-	dec.Runner.Register("Index_count", func(s ...interface{}) interface{} {
-		return int(s[0].(*Ctx).Index_count)
-	})
-
-	dec.Runner.Register("body_rdm", func(s ...interface{}) interface{} {
-		r := s[0].(*Ctx)
-		buf := make([]byte, r.Indexs[0].Off)
-		dec.Rd.Read(buf)
-		return nil
-	})
-
-	body_count := 0
-	dec.Runner.Register("singles_size", func(s ...interface{}) interface{} {
-		r := s[0].(*Ctx)
-
-		body_count++
-		if body_count < int(r.Index_count) {
-			return int(r.Indexs[body_count].Off - r.Indexs[body_count-1].Off)
-		} else {
-			return -1
-		}
-	})
-
-	if e := dec.Decode(ctxType, &h); e != nil {
-		return e
+	if err := h.Unmarshal(rd); err != nil {
+		return err
 	}
-
-	h.Unmarshal()
 
 	encoder := json.NewEncoder(wt)
 	encoder.SetIndent("", "\t")
@@ -142,19 +192,10 @@ func parseCtx(rd io.Reader, wt io.Writer) error {
 func compileCtx(rd io.Reader, wt io.Writer) error {
 	var h Ctx
 
-	ctxType := bstruct.MustNew(h)
-
-	e := json.NewDecoder(rd).Decode(&h)
-	if e != nil {
-		return e
+	err := json.NewDecoder(rd).Decode(&h)
+	if err != nil {
+		return err
 	}
 
-	if e := h.Marshal(); e != nil {
-		return e
-	}
-
-	enc := bstruct.NewEncoder()
-	enc.Wt = wt
-
-	return enc.Encode(ctxType, &h)
+	return h.Marshal(wt)
 }
