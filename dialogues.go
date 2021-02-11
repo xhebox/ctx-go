@@ -63,7 +63,7 @@ type Dialogues struct {
 
 func (s *Dialogues) Unmarshal(rd io.Reader) error {
 	if err := s.EnableDesc.Unmarshal(rd); err != nil {
-		return fmt.Errorf("wide -> %w", err)
+		return fmt.Errorf("enable_desc -> %w", err)
 	}
 	var length U32
 	if err := length.Unmarshal(rd); err != nil {
@@ -80,7 +80,7 @@ func (s *Dialogues) Unmarshal(rd io.Reader) error {
 
 func (s *Dialogues) Marshal(wt io.Writer) error {
 	if err := s.EnableDesc.Marshal(wt); err != nil {
-		return fmt.Errorf("wide -> %w", err)
+		return fmt.Errorf("enable_desc -> %w", err)
 	}
 	length := U32(len(s.Dialogues))
 	if err := length.Marshal(wt); err != nil {
