@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -116,7 +117,7 @@ func (s *Ctx) Unmarshal(rd io.Reader) error {
 			var t CtxSingle
 			err := t.Unmarshal(rd)
 			if err != nil {
-				if last && err == io.EOF {
+				if last && errors.Is(err, io.EOF) {
 					return nil
 				} else {
 					total := U32(0)
