@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -40,7 +39,8 @@ func getfmt(filename string) (string, string) {
 	if strings.HasSuffix(rfile, ".ctx") {
 		return "ctx", mode
 	}
-	rfile = path.Base(rfile)
+
+	rfile = filepath.Base(rfile)
 	if strings.HasPrefix(rfile, "quests") {
 		return "quests", mode
 	} else if strings.HasPrefix(rfile, "glossary") {
@@ -54,8 +54,8 @@ func getfmt(filename string) (string, string) {
 func process(in, out, format string) error {
 	var buffer bytes.Buffer
 
-	in = path.Clean(in)
-	out = path.Clean(out)
+	in = filepath.Clean(in)
+	out = filepath.Clean(out)
 
 	realfmt, mode := getfmt(in)
 	if format != "auto" {
@@ -155,7 +155,7 @@ func main() {
 		fmt.Printf("\n%s -i dirs-of-files -o unpack, will work too. Program will detect bin_win32, bin_exp1_win32, content, text directories, and all supported file formats automatically.\n", os.Args[0])
 	}
 	flag.Parse()
-	log.SetFlags(log.Llongfile)
+	log.SetFlags(log.Lshortfile)
 
 	if i, err := os.Stat(in); err == nil && !i.IsDir() {
 		err := process(in, out, format)
@@ -192,10 +192,10 @@ func main() {
 					return err
 				}
 			default:
-				if p != in {
-					return filepath.SkipDir
-				} else {
+				if p == in {
 					return process_dir(p, out)
+				} else {
+					return filepath.SkipDir
 				}
 			}
 		}
