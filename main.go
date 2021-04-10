@@ -149,7 +149,7 @@ func main() {
 	flag.CommandLine.Usage = func() {
 		orig()
 		fmt.Printf("\n%s -i inputs.ctx, will unpack the file into 'output.json'. Formats are detected by file extension.\n", os.Args[0])
-		fmt.Printf("%s -i output.json -o inputs.ctx.mod -f ctx, will pack the file into 'inputs.ctx.mod', with an explicit format hint.\n", os.Args[0])
+		fmt.Printf("%s -i output.json -o inputs.ctx.mod -f ctx, will pack the file into 'inputs.ctx.mod', with an explicit format hint. Packing or not is decided by if there is a '.json' suffix.\n", os.Args[0])
 		fmt.Printf("\n%s -i path-to-spellforce -o unpack, will unpack all supported files in the game directory into dir 'unpack'. Unpacked files are suffixed with '.json'.\n", os.Args[0])
 		fmt.Printf("%s -i unpack -o path-to-spellforce, will convert it back.\n", os.Args[0])
 		fmt.Printf("\n%s -i dirs-of-files -o unpack, will work too. Program will detect bin_win32, bin_exp1_win32, content, text directories, and all supported file formats automatically.\n", os.Args[0])
