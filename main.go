@@ -51,18 +51,21 @@ func getfmt(filename string) (string, string) {
 	return filename, mode
 }
 
-func process(in, out, format string) error {
+func process(in, out, format, mode string) error {
 	var buffer bytes.Buffer
 
 	in = filepath.Clean(in)
 	out = filepath.Clean(out)
 
-	realfmt, mode := getfmt(in)
+	realfmt, realmode := getfmt(in)
 	if format != "auto" {
 		realfmt = format
 	}
+	if mode != "auto" {
+		realmode = mode
+	}
 
-	switch mode {
+	switch realmode {
 	case "parse":
 		decoder, ok := decoders[realfmt]
 		if !ok {
@@ -109,13 +112,16 @@ func process(in, out, format string) error {
 	return nil
 }
 
-func process_dir(in, out string) error {
+func process_dir(in, out, mode string) error {
 	err := filepath.Walk(in, func(p string, info os.FileInfo, err error) error {
 		if info.IsDir() && p != in {
 			return filepath.SkipDir
 		}
-		realfmt, _ := getfmt(p)
+		realfmt, realmode := getfmt(p)
 		if realfmt == p {
+			return nil
+		}
+		if mode != "auto" && mode != realmode {
 			return nil
 		}
 		log.Printf("%s\n", p)
@@ -128,7 +134,7 @@ func process_dir(in, out string) error {
 		if err != nil {
 			return err
 		}
-		err = process(p, o, realfmt)
+		err = process(p, o, realfmt, mode)
 		if err != nil && strings.HasPrefix(err.Error(), "unsupport realfmt") {
 			return nil
 		}
@@ -141,10 +147,11 @@ func process_dir(in, out string) error {
 }
 
 func main() {
-	var in, out, format string
+	var in, out, format, mode string
 	flag.StringVar(&in, "i", "input", "input file [or directory].")
 	flag.StringVar(&out, "o", "output", "output file [or directory].")
 	flag.StringVar(&format, "f", "auto", "file format, one of ctx/, [ignored if input is a directory]")
+	flag.StringVar(&mode, "m", "auto", "auto/parse/compile. When it is auto, parse if file format is recognized, compile if file ended with .json.")
 	orig := flag.CommandLine.Usage
 	flag.CommandLine.Usage = func() {
 		orig()
@@ -153,12 +160,13 @@ func main() {
 		fmt.Printf("\n%s -i path-to-spellforce -o unpack, will unpack all supported files in the game directory into dir 'unpack'. Unpacked files are suffixed with '.json'.\n", os.Args[0])
 		fmt.Printf("%s -i unpack -o path-to-spellforce, will convert it back.\n", os.Args[0])
 		fmt.Printf("\n%s -i dirs-of-files -o unpack, will work too. Program will detect bin_win32, bin_exp1_win32, content, text directories, and all supported file formats automatically.\n", os.Args[0])
+		fmt.Printf("\n%s -i dirs-of-files -o dirs-of-files -m compile. Program will do a in-place pack for files, no unpacking will be executed.\n", os.Args[0])
 	}
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
 
 	if i, err := os.Stat(in); err == nil && !i.IsDir() {
-		err := process(in, out, format)
+		err := process(in, out, format, mode)
 		if err != nil {
 			log.Fatalf("fail to process the file %q: %v\n", in, err)
 		}
@@ -169,31 +177,31 @@ func main() {
 			var err error
 			switch info.Name() {
 			case "bin_win32":
-				err = process_dir(filepath.Join(p, "content"), filepath.Join(out, "bin_win32", "content"))
+				err = process_dir(filepath.Join(p, "content"), filepath.Join(out, "bin_win32", "content"), mode)
 				if err != nil {
 					return err
 				}
-				err = process_dir(filepath.Join(p, "text"), filepath.Join(out, "bin_win32", "text"))
+				err = process_dir(filepath.Join(p, "text"), filepath.Join(out, "bin_win32", "text"), mode)
 				if err != nil {
 					return err
 				}
 			case "bin_exp1_win32":
-				err = process_dir(filepath.Join(p, "content"), filepath.Join(out, "bin_exp1_win32", "content"))
+				err = process_dir(filepath.Join(p, "content"), filepath.Join(out, "bin_exp1_win32", "content"), mode)
 				if err != nil {
 					return err
 				}
-				err = process_dir(filepath.Join(p, "text"), filepath.Join(out, "bin_exp1_win32", "text"))
+				err = process_dir(filepath.Join(p, "text"), filepath.Join(out, "bin_exp1_win32", "text"), mode)
 				if err != nil {
 					return err
 				}
 			case "content", "text":
-				err = process_dir(p, filepath.Join(out, info.Name()))
+				err = process_dir(p, filepath.Join(out, info.Name()), mode)
 				if err != nil {
 					return err
 				}
 			default:
 				if p == in {
-					return process_dir(p, out)
+					return process_dir(p, out, mode)
 				} else {
 					return filepath.SkipDir
 				}
